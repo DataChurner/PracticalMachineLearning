@@ -1,0 +1,139 @@
+---
+title: "Course Project"
+author: "Kiran Joshi"
+date: "December 10, 2017"
+output: pdf_document
+---
+
+```{r global, echo=FALSE}
+knitr::opts_chunk$set(echo=TRUE, warning=FALSE, out.width='950px', dpi=200)
+```
+
+```{r setup, include=FALSE}
+library(RCurl)
+library(caret)
+library(corrplot)
+```
+# Overview
+
+We are going to analyze the personal activity monitors accelerometer information to predict the type of activity the person is doing. The data contains activities performed exactly as per specification of the exercise classified as A, and all the other errors into classed B-E as follows.
+
+* exactly according to the specification (Class A)
+* throwing the elbows to the front (Class B)
+* lifting the dumbbell only halfway (Class C)
+* lowering the dumbbell only halfway (Class D) 
+* throwing the hips to the front (Class E).
+
+We will fit a model with the minimum features from the training data set to classify the activity in the test data set using Random Forest algorithm.
+
+# Assumptions
+
+* Our testing data will be a 70% split
+* Model will be trained and validated on the training data, and prediction performed on the testing data
+* Random forest with a 100 trees would be a good prediction model for the classification problem.
+
+# Data Analysis
+
+Lets obtain the data from the website, and do some introspection into the training data.
+
+```{r training}
+trndatapth <- getURL("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+tstdatapth <- getURL("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+training <- read.csv(textConnection(trndatapth),header = T)
+testing <- read.csv(textConnection(tstdatapth),header = T)
+dim(training)
+str(training)
+```
+
+# Feature Selection
+
+We first need to clean up the training data to remove the predictors that have NA values for all the records since they are bound to have no impact on the learning.
+
+```{r Remove1}
+train <- training[, colSums(is.na(training)) == 0] 
+```
+
+Remove all timestamp columns as the tests were random, and were independent of time factor from training data.Remove all the row Identities, as they should not make an impact on the learning, and avoid the algorithm from associating the predictors to specific identities.
+
+```{r Remove2}
+trainRemove <- grepl("^X|timestamp|window|_id", names(train))
+train <- train[, !trainRemove]
+```
+
+We will further strip all categorical variables as there are a lot of blank (not NA) values and cannot be imputed; except the dependent categorical information from the data set.
+
+```{r Remove3}
+trainData <- train[, sapply(train, is.numeric)]
+#Adding the Classe back
+trainData$classe <- train$classe
+```
+
+We quickly analyse the data for variance, to see if there are any further variables that can be eliminated. Variables that show no variance are potentially constants that do not add value in the model.
+
+```{r Variance}
+nsv <- nearZeroVar(trainData,saveMetrics = T)
+nsv
+```
+
+
+Since none of the variables have true zero variance or near zero variance, it has passed the nsv test.
+
+# Plotting Predictors
+
+A correlation among variables is analysed before proceeding to the modeling procedures.
+We would just consider the predictors and thus the classe variable is removed.
+
+```{r PlottingPredictors}
+trainCor <- cor(trainData[, -53])
+corrplot(trainCor, order = "original", method = "color", type = "lower",tl.cex = 0.45, tl.col = rgb(.5, .5, 0))
+```
+
+The highly correlated variables are shown in dark colors in the graph above.As we can see, there are not too many highly correlated variables (ignoring the diagonal), and hence does not need more cleanup to avoid overfitting.
+
+Although we have been given explicit testing and training data, we will split the data randomly to get 75% of the data found in the training data for fitting the model, so that we do not touch the test data provided for tuning or cross-validation of the model.
+
+# Prediction Model
+
+We will try to predict the classe from the other variables in the dataset.
+
+```{r Split}
+set.seed(54321) 
+inTrain <- createDataPartition(trainData$classe, p=0.75, list=FALSE)
+train_data <- trainData[inTrain, ]
+test_data <- trainData[-inTrain, ]
+```
+
+We will use the Random Forest method to fit the model as per our assumption
+
+```{r FitModel, cache=TRUE}
+FitRandForest <- train(classe ~ ., data=train_data, method="rf", ntree=100)
+```
+
+Lets now check if we have a good fit, based on the accuracy of the model
+
+```{r Accuracy}
+FitRandForest$finalModel
+```
+
+As we can see, the error rate is 0.71%, which puts the model at 99.29% accuracy.
+
+We can now validate the model against test_data, which is still a part of the training set and compare the predicted values against the true values using a confusion matrix.
+
+```{r Confusion}
+PredRandForest<- predict(FitRandForest, newdata = test_data)
+confusionMatrix(PredRandForest,test_data$classe)
+```
+
+With 99.35% accuracy, we should be now confident to test it against the testing data.
+
+```{r Predict}
+features <- names(trainData)
+features <- features[-53]
+testData <- testing[,features]
+PredtestData <- predict(FitRandForest, newdata = testData)
+PredtestData
+```
+
+# Conclusion
+
+The Testing data Classes were predicted, and the output used to complete the Quiz section of the project.
